@@ -25,9 +25,17 @@ export function createApp() {
       contentSecurityPolicy: false,
     })
   );
+  const allowedOrigins = (process.env.CORS_ORIGINS || "http://localhost:3000")
+    .split(",")
+    .map((o) => o.trim())
+    .filter(Boolean);
   app.use(
     cors({
-      origin: (origin, cb) => cb(null, true),
+      origin: (origin, cb) => {
+        // Peticiones sin Origin (curl, health checks, same-origin) se permiten.
+        if (!origin || allowedOrigins.includes(origin)) return cb(null, true);
+        return cb(new Error("Origen no permitido por CORS"));
+      },
       credentials: true,
     })
   );

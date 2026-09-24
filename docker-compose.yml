@@ -31,6 +31,7 @@ services:
       JWT_SECRET: ${JWT_SECRET:-dev-jwt-secret-change-me-0000000000}
       ENCRYPTION_KEY: ${ENCRYPTION_KEY:-dev-encryption-key-change-me-0000}
       ALLOW_SIGNUP: ${ALLOW_SIGNUP:-true}
+      CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost:3000}
       PAYMENT_GATEWAY: ${PAYMENT_GATEWAY:-simulated}
       WOMPI_ENV: ${WOMPI_ENV:-sandbox}
       WOMPI_PUBLIC_KEY: ${WOMPI_PUBLIC_KEY:-}

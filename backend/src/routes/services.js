@@ -6,7 +6,7 @@ import { validateBody } from "../lib/validate.js";
 import { Errors } from "../lib/errors.js";
 import { audit } from "../lib/audit.js";
 import { processPayment } from "../services/paymentEngine.js";
-import { computeScheduledFor, periodKeyFor } from "../lib/dates.js";
+import { computeScheduledFor, periodKeyFor, nextOccurrenceOnOrAfter, rollForward } from "../lib/dates.js";
 import { idempotencyKey as buildIdempotencyKey } from "../lib/crypto.js";
 
 const router = Router();
@@ -21,11 +21,13 @@ const createSchema = z
     category: z.string().min(1).max(60),
     reference: z.string().min(1).max(120),
     amountType: z.enum(["FIXED", "VARIABLE"]),
-    fixedAmountCop: z.number().int().positive().optional().nullable(),
-    maxAmountCop: z.number().int().positive().optional().nullable(),
+    fixedAmountCop: z.number().int().positive().max(1_000_000_000).optional().nullable(),
+    maxAmountCop: z.number().int().positive().max(1_000_000_000).optional().nullable(),
     frequency: z.enum(FREQUENCIES),
     dueDay: z.number().int().min(1).max(31),
-    anchorDate: z.coerce.date(),
+    // Opcional: si no se envía, se calcula como la próxima ocurrencia de dueDay
+    // (>= hoy, hora America/Bogota) según la frecuencia. Ver lib/dates.js#nextOccurrenceOnOrAfter.
+    anchorDate: z.coerce.date().optional(),
     payDaysBefore: z.number().int().min(0).max(15).default(2),
     paymentMethodId: z.number().int().positive().optional().nullable(),
   })
@@ -38,8 +40,8 @@ const updateSchema = z.object({
   customName: z.string().min(1).max(120).optional().nullable(),
   category: z.string().min(1).max(60).optional(),
   reference: z.string().min(1).max(120).optional(),
-  fixedAmountCop: z.number().int().positive().optional().nullable(),
-  maxAmountCop: z.number().int().positive().optional().nullable(),
+  fixedAmountCop: z.number().int().positive().max(1_000_000_000).optional().nullable(),
+  maxAmountCop: z.number().int().positive().max(1_000_000_000).optional().nullable(),
   frequency: z.enum(FREQUENCIES).optional(),
   dueDay: z.number().int().min(1).max(31).optional(),
   payDaysBefore: z.number().int().min(0).max(15).optional(),
@@ -76,6 +78,14 @@ router.post("/", validateBody(createSchema), async (req, res, next) => {
       });
       if (!pm) throw Errors.badRequest("Tarjeta no encontrada");
     }
+
+    const now = new Date();
+    // anchorDate por defecto: próxima ocurrencia de dueDay a partir de hoy. Si el cliente
+    // envía un anchorDate explícito (incluso en el pasado), lo hacemos avanzar hasta el primer
+    // ciclo >= ahora para nunca cobrar periodos históricos automáticamente al crear el servicio.
+    const requestedAnchor = body.anchorDate ?? nextOccurrenceOnOrAfter(now, body.dueDay, body.frequency);
+    const anchorDate = rollForward(requestedAnchor, body.dueDay, body.frequency, now);
+
     const service = await prisma.service.create({
       data: {
         userId: req.user.id,
@@ -88,11 +98,11 @@ router.post("/", validateBody(createSchema), async (req, res, next) => {
         maxAmountCop: body.maxAmountCop ?? null,
         frequency: body.frequency,
         dueDay: body.dueDay,
-        anchorDate: body.anchorDate,
+        anchorDate,
         payDaysBefore: body.payDaysBefore,
         paymentMethodId: body.paymentMethodId || null,
         status: "ACTIVE",
-        nextDueDate: body.anchorDate,
+        nextDueDate: anchorDate,
       },
       include: { biller: true, paymentMethod: true },
     });
@@ -196,7 +206,14 @@ router.post("/:id/pause", async (req, res, next) => {
 router.post("/:id/resume", async (req, res, next) => {
   try {
     const service = await loadOwnedService(req);
-    const updated = await prisma.service.update({ where: { id: service.id }, data: { status: "ACTIVE" } });
+    const now = new Date();
+    // Si el servicio estuvo pausado un tiempo largo, nextDueDate puede haber quedado en el
+    // pasado: lo hacemos avanzar para no generar/cobrar automáticamente periodos vencidos.
+    const rolledNextDueDate = rollForward(service.nextDueDate, service.dueDay, service.frequency, now);
+    const updated = await prisma.service.update({
+      where: { id: service.id },
+      data: { status: "ACTIVE", nextDueDate: rolledNextDueDate },
+    });
     await audit({
       userId: req.user.id,
       actorId: req.user.id,

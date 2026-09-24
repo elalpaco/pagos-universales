@@ -14,6 +14,7 @@ import { useToast } from "../../components/Toast";
 import { useUser } from "../../lib/auth";
 import api, { ApiError } from "../../lib/api";
 import { formatCOP, formatDate } from "../../lib/format";
+import { nextOccurrenceOnOrAfter, toDateInputValue, fromDateInputValue } from "../../lib/dates";
 
 const FREQ_LABEL = {
   WEEKLY: "Semanal",
@@ -21,6 +22,21 @@ const FREQ_LABEL = {
   BIMONTHLY: "Bimestral",
   QUARTERLY: "Trimestral",
   YEARLY: "Anual",
+};
+
+const FIELD_LABEL = {
+  billerId: "Facturador",
+  customName: "Nombre",
+  category: "Categoría",
+  reference: "Referencia",
+  amountType: "Tipo de monto",
+  fixedAmountCop: "Monto fijo",
+  maxAmountCop: "Tope máximo",
+  frequency: "Frecuencia",
+  dueDay: "Día de vencimiento",
+  anchorDate: "Primer vencimiento",
+  payDaysBefore: "Días antes para pagar",
+  paymentMethodId: "Tarjeta",
 };
 
 export default function ServiciosPage() {
@@ -116,6 +132,8 @@ function ServiceWizard({ open, onClose, onCreated }) {
   const [cards, setCards] = useState([]);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
+  const [fieldErrors, setFieldErrors] = useState(null);
+  const [anchorTouched, setAnchorTouched] = useState(false);
 
   const [details, setDetails] = useState({
     reference: "",
@@ -127,6 +145,7 @@ function ServiceWizard({ open, onClose, onCreated }) {
     payDaysBefore: 2,
     paymentMethodId: "",
     customName: "",
+    anchorDate: "",
   });
 
   useEffect(() => {
@@ -136,6 +155,8 @@ function ServiceWizard({ open, onClose, onCreated }) {
       setCategory("");
       setSelectedBiller(null);
       setError("");
+      setFieldErrors(null);
+      setAnchorTouched(false);
       setDetails({
         reference: "",
         amountType: "FIXED",
@@ -146,9 +167,23 @@ function ServiceWizard({ open, onClose, onCreated }) {
         payDaysBefore: 2,
         paymentMethodId: "",
         customName: "",
+        anchorDate: "",
       });
     }
   }, [open]);
+
+  // Recalcula automáticamente "Primer vencimiento" (próxima ocurrencia de dueDay, hora
+  // Bogotá) mientras el usuario no lo haya editado a mano; ver lib/dates.js del backend
+  // (nextOccurrenceOnOrAfter) para la misma lógica del lado servidor.
+  useEffect(() => {
+    if (!open || anchorTouched) return;
+    const day = Number(details.dueDay);
+    if (!day || day < 1 || day > 31) return;
+    const computed = nextOccurrenceOnOrAfter(new Date(), day, details.frequency);
+    const value = toDateInputValue(computed);
+    setDetails((d) => (d.anchorDate === value ? d : { ...d, anchorDate: value }));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open, anchorTouched, details.dueDay, details.frequency]);
 
   useEffect(() => {
     if (!open) return;
@@ -201,8 +236,10 @@ function ServiceWizard({ open, onClose, onCreated }) {
 
   async function handleConfirm() {
     setError("");
+    setFieldErrors(null);
     setSaving(true);
     try {
+      const anchor = fromDateInputValue(details.anchorDate);
       const payload = {
         billerId: selectedBiller?.id,
         customName: details.customName || undefined,
@@ -213,6 +250,7 @@ function ServiceWizard({ open, onClose, onCreated }) {
         maxAmountCop: details.maxAmountCop || undefined,
         frequency: details.frequency,
         dueDay: Number(details.dueDay),
+        anchorDate: anchor ? anchor.toISOString() : undefined,
         payDaysBefore: Number(details.payDaysBefore) || 0,
         paymentMethodId: details.paymentMethodId || undefined,
       };
@@ -220,13 +258,22 @@ function ServiceWizard({ open, onClose, onCreated }) {
       toast.success("Servicio agregado.");
       onCreated();
     } catch (err) {
-      setError(err instanceof ApiError ? err.message : "No se pudo crear el servicio.");
+      if (err instanceof ApiError && err.code === "VALIDATION_ERROR" && err.details) {
+        setFieldErrors(err.details);
+        setError("Revisa los datos marcados abajo.");
+      } else {
+        setError(err instanceof ApiError ? err.message : "No se pudo crear el servicio.");
+      }
     } finally {
       setSaving(false);
     }
   }
 
-  const canGoDetails = details.reference.trim().length > 0 && details.dueDay && (details.amountType === "VARIABLE" || details.fixedAmountCop > 0);
+  const canGoDetails =
+    details.reference.trim().length > 0 &&
+    details.dueDay &&
+    details.anchorDate &&
+    (details.amountType === "VARIABLE" || details.fixedAmountCop > 0);
 
   return (
     <Modal open={open} onClose={onClose} title="Agregar servicio" width={560}>
@@ -379,6 +426,19 @@ function ServiceWizard({ open, onClose, onCreated }) {
             hint="Recomendado: 2 días antes."
           />
 
+          <Input
+            id="anchorDate"
+            label="Primer vencimiento"
+            type="date"
+            required
+            value={details.anchorDate}
+            onChange={(e) => {
+              setAnchorTouched(true);
+              setDetails({ ...details, anchorDate: e.target.value });
+            }}
+            hint="Calculado automáticamente a partir del día de vencimiento; puedes ajustarlo."
+          />
+
           <div className="modal-actions">
             <Button variant="secondary" onClick={() => setStep(0)}>Atrás</Button>
             <Button disabled={!canGoDetails} onClick={() => setStep(2)}>Continuar</Button>
@@ -429,6 +489,7 @@ function ServiceWizard({ open, onClose, onCreated }) {
               <Row label={selectedBiller.referenceLabel || "Referencia"} value={details.reference} />
               <Row label="Frecuencia" value={FREQ_LABEL[details.frequency]} />
               <Row label="Día de vencimiento" value={details.dueDay} />
+              <Row label="Primer vencimiento" value={formatDate(fromDateInputValue(details.anchorDate))} />
               <Row
                 label={details.amountType === "FIXED" ? "Monto fijo" : "Tope máximo"}
                 value={formatCOP(details.amountType === "FIXED" ? details.fixedAmountCop || 0 : details.maxAmountCop || 0)}
@@ -437,7 +498,21 @@ function ServiceWizard({ open, onClose, onCreated }) {
               <Row label="Tarjeta" value={cards.find((c) => c.id === details.paymentMethodId) ? `•••• ${cards.find((c) => c.id === details.paymentMethodId).last4}` : "Predeterminada"} />
             </dl>
           </Card>
-          {error && <div className="field-error" style={{ marginBottom: 10 }}>{error}</div>}
+          {error && <div className="field-error" style={{ marginBottom: 6 }}>{error}</div>}
+          {fieldErrors && (
+            <ul className="field-error" style={{ marginBottom: 10, paddingLeft: 18 }}>
+              {Object.entries(fieldErrors.fieldErrors || {}).map(([field, messages]) =>
+                (messages || []).map((msg, i) => (
+                  <li key={`${field}-${i}`}>
+                    {FIELD_LABEL[field] || field}: {msg}
+                  </li>
+                ))
+              )}
+              {(fieldErrors.formErrors || []).map((msg, i) => (
+                <li key={`form-${i}`}>{msg}</li>
+              ))}
+            </ul>
+          )}
           <div className="modal-actions">
             <Button variant="secondary" onClick={() => setStep(2)}>Atrás</Button>
             <Button loading={saving} onClick={handleConfirm}>Confirmar servicio</Button>

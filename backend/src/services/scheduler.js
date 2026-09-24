@@ -1,7 +1,7 @@
 import prisma from "../lib/prisma.js";
 import { audit } from "../lib/audit.js";
 import { notify } from "../lib/notify.js";
-import { advanceDueDate, computeScheduledFor, periodKeyFor, bogotaParts } from "../lib/dates.js";
+import { advanceDueDate, computeScheduledFor, periodKeyFor, bogotaParts, rollForward } from "../lib/dates.js";
 import { idempotencyKey as buildIdempotencyKey } from "../lib/crypto.js";
 import { processPayment } from "./paymentEngine.js";
 import { formatCop } from "../lib/format.js";
@@ -20,7 +20,16 @@ async function planServices(now) {
     });
     if (pending > 0) continue;
 
-    const dueDate = service.nextDueDate;
+    // Si el servicio quedó pausado (o sin correr el tick) por mucho tiempo, nextDueDate puede
+    // haber quedado varios ciclos en el pasado. Lo avanzamos hasta el primer ciclo cuyo
+    // scheduledFor sea >= ahora en lugar de crear un Payment retroactivo para un periodo vencido.
+    let dueDate = service.nextDueDate;
+    const rolledDueDate = rollForward(dueDate, service.dueDay, service.frequency, now);
+    if (rolledDueDate.getTime() !== dueDate.getTime()) {
+      await prisma.service.update({ where: { id: service.id }, data: { nextDueDate: rolledDueDate } });
+      dueDate = rolledDueDate;
+    }
+
     const periodKey = periodKeyFor(dueDate, service.frequency);
     const scheduledFor = computeScheduledFor(dueDate, service.payDaysBefore);
     const idempotencyKey = buildIdempotencyKey(service.id, periodKey, 0);

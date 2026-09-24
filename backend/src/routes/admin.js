@@ -7,6 +7,7 @@ import { Errors } from "../lib/errors.js";
 import { config } from "../config.js";
 import { runTick } from "../services/scheduler.js";
 import { completePayout, failPayout } from "../services/paymentEngine.js";
+import { bogotaParts, makeBogotaDate } from "../lib/dates.js";
 
 const router = Router();
 router.use(requireAuth, requireAdmin);
@@ -14,7 +15,8 @@ router.use(requireAuth, requireAdmin);
 router.get("/overview", async (req, res, next) => {
   try {
     const now = new Date();
-    const startOfMonth = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1));
+    const p = bogotaParts(now);
+    const startOfMonth = makeBogotaDate(p.year, p.month, 1);
 
     const [users, activeServices, chargedThisMonth, failedCount, disbursingCount] = await Promise.all([
       prisma.user.count(),
@@ -44,7 +46,7 @@ router.get("/payouts", async (req, res, next) => {
   try {
     const payouts = await prisma.payment.findMany({
       where: { status: "DISBURSING" },
-      include: { service: true, user: true },
+      include: { service: { include: { biller: true } }, user: true },
       orderBy: { chargedAt: "asc" },
     });
     res.json({ payouts });

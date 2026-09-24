@@ -117,8 +117,12 @@ export async function processPayment(paymentId, now = new Date()) {
     return prisma.payment.findUnique({ where: { id: payment.id } });
   }
 
-  // Persistir el monto resuelto antes de intentar el cobro.
-  if (payment.amountCop == null || payment.status === "PENDING_APPROVAL") {
+  // Persistir el monto resuelto antes de intentar el cobro. Se hace siempre (no solo cuando
+  // amountCop venía null) porque un pago FIXED ya trae amountCop desde su creación pero nunca
+  // tenía feeCop/totalCop calculados hasta aquí; si solo persistíamos cuando totalCop era null
+  // en el chequeo original, un pago fijo con totalCop aún null quedaba sin persistir y luego
+  // se cobraba con totalCop=null (NaN en la pasarela, notificación "Cobramos $0").
+  if (payment.totalCop == null || payment.status === "PENDING_APPROVAL") {
     await prisma.payment.update({
       where: { id: payment.id },
       data: { amountCop, feeCop, totalCop },
@@ -160,6 +164,15 @@ export async function attemptCharge(paymentId, now = new Date()) {
     return failPayment(payment, "No hay tarjeta activa/vigente para cobrar", now, {
       immediate: true,
     });
+  }
+
+  if (!Number.isInteger(payment.totalCop) || payment.totalCop <= 0) {
+    return failPayment(
+      payment,
+      `Monto inválido para cobrar (totalCop=${payment.totalCop})`,
+      now,
+      { immediate: true }
+    );
   }
 
   const gateway = getGateway();

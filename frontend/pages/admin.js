@@ -23,17 +23,21 @@ export default function AdminPage() {
   const [completeTarget, setCompleteTarget] = useState(null);
   const [failTarget, setFailTarget] = useState(null);
   const [busyId, setBusyId] = useState(null);
+  const [appConfig, setAppConfig] = useState(null);
+  const [simulatedNow, setSimulatedNow] = useState("");
 
   const load = useCallback(async () => {
     try {
-      const [ov, po, us] = await Promise.all([
+      const [ov, po, us, cfg] = await Promise.all([
         api.get("/api/admin/overview"),
         api.get("/api/admin/payouts"),
         api.get("/api/admin/users"),
+        api.get("/api/config"),
       ]);
       setOverview(ov);
       setPayouts(po.payouts || po.items || po || []);
       setUsers(us.users || us.items || us || []);
+      setAppConfig(cfg);
     } catch (err) {
       toast.error(err instanceof ApiError ? err.message : "No se pudo cargar el panel de administración.");
     }
@@ -46,7 +50,8 @@ export default function AdminPage() {
   async function runScheduler() {
     setRunningScheduler(true);
     try {
-      await api.post("/api/admin/scheduler/run");
+      const body = simulatedNow ? { now: new Date(simulatedNow).toISOString() } : undefined;
+      await api.post("/api/admin/scheduler/run", body);
       toast.success("Programador ejecutado.");
       load();
     } catch (err) {
@@ -55,6 +60,8 @@ export default function AdminPage() {
       setRunningScheduler(false);
     }
   }
+
+  const isProduction = appConfig?.env === "production";
 
   if (user && user.role !== "ADMIN") {
     return (
@@ -73,9 +80,22 @@ export default function AdminPage() {
           <h1 className="page-title">Administración</h1>
           <p className="page-subtitle">Métricas, desembolsos y operación del sistema.</p>
         </div>
-        <Button variant="secondary" loading={runningScheduler} onClick={runScheduler}>
-          <Icon name="bolt" size={15} /> Correr programador ahora
-        </Button>
+        <div className="flex items-center gap-8" style={{ flexWrap: "wrap" }}>
+          {!isProduction && (
+            <Input
+              id="simulatedNow"
+              label="Simular fecha"
+              type="datetime-local"
+              value={simulatedNow}
+              onChange={(e) => setSimulatedNow(e.target.value)}
+              hint="Opcional: solo disponible fuera de producción."
+              wrapperClassName="field-inline"
+            />
+          )}
+          <Button variant="secondary" loading={runningScheduler} onClick={runScheduler}>
+            <Icon name="bolt" size={15} /> Correr programador ahora
+          </Button>
+        </div>
       </div>
 
       {!overview ? (

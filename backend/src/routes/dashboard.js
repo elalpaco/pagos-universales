@@ -20,12 +20,12 @@ router.get("/", async (req, res, next) => {
           where: { userId, status: "SCHEDULED" },
           orderBy: { scheduledFor: "asc" },
           take: 10,
-          include: { service: true },
+          include: { service: { include: { biller: true } } },
         }),
         prisma.payment.findMany({
           where: { userId, status: "PENDING_APPROVAL" },
           orderBy: { dueDate: "asc" },
-          include: { service: true },
+          include: { service: { include: { biller: true } } },
         }),
         prisma.payment.aggregate({
           where: { userId, dueDate: { gte: start, lt: end }, status: { notIn: ["SKIPPED"] } },
@@ -40,6 +40,7 @@ router.get("/", async (req, res, next) => {
         prisma.payment.findFirst({
           where: { userId, status: "SCHEDULED" },
           orderBy: { scheduledFor: "asc" },
+          include: { service: { include: { biller: true } } },
         }),
       ]);
 

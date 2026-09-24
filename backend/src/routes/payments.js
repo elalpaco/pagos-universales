@@ -21,7 +21,7 @@ router.get("/", async (req, res, next) => {
     const [payments, total] = await Promise.all([
       prisma.payment.findMany({
         where,
-        include: { service: true },
+        include: { service: { include: { biller: true } } },
         orderBy: { createdAt: "desc" },
         skip: (pageNum - 1) * pageSize,
         take: pageSize,
@@ -48,7 +48,10 @@ router.get("/:id", async (req, res, next) => {
       where: { entity: "Payment", entityId: payment.id },
       orderBy: { createdAt: "asc" },
     });
-    const service = await prisma.service.findUnique({ where: { id: payment.serviceId } });
+    const service = await prisma.service.findUnique({
+      where: { id: payment.serviceId },
+      include: { biller: true },
+    });
     res.json({ payment, service, timeline });
   } catch (err) {
     next(err);
@@ -88,7 +91,7 @@ router.post("/:id/retry", async (req, res, next) => {
   }
 });
 
-const amountSchema = z.object({ amountCop: z.number().int().positive() });
+const amountSchema = z.object({ amountCop: z.number().int().positive().max(1_000_000_000) });
 
 router.patch("/:id/amount", validateBody(amountSchema), async (req, res, next) => {
   try {

@@ -70,12 +70,25 @@ async function seedAdmin() {
   }
 
   const passwordHash = await bcrypt.hash(password, 10);
+  // Por defecto, re-sembrar no toca la contraseña de un admin ya existente (para no pisar un
+  // cambio de contraseña hecho desde la app). Con ADMIN_RESET_PASSWORD=true sí se actualiza el
+  // hash en cada `npm run seed`, útil para resetear el acceso en desarrollo/staging.
+  const resetPassword = (process.env.ADMIN_RESET_PASSWORD || "false").toLowerCase() === "true";
+  const existing = await prisma.user.findUnique({ where: { email } });
+  const updateData = { name, role: "ADMIN" };
+  if (resetPassword || !existing) {
+    updateData.passwordHash = passwordHash;
+  }
   const user = await prisma.user.upsert({
     where: { email },
-    update: { name, role: "ADMIN" },
+    update: updateData,
     create: { email, name, passwordHash, role: "ADMIN" },
   });
-  console.log(`Usuario admin listo: ${user.email} (id ${user.id})`);
+  console.log(
+    `Usuario admin listo: ${user.email} (id ${user.id})${
+      existing && resetPassword ? " — contraseña actualizada (ADMIN_RESET_PASSWORD=true)" : ""
+    }`
+  );
 }
 
 async function main() {

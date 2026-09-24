@@ -86,3 +86,52 @@ export function addHours(date, hours) {
 export function addDays(date, days) {
   return new Date(date.getTime() + days * 86400000);
 }
+
+// Calcula la primera fecha de vencimiento (>= referenceDate, en hora de Bogotá) para un
+// dueDay/frecuencia dados. Para frecuencias mensuales+ es el día dueDay (con clamping por fin
+// de mes) del mes actual si aún no pasó, o el del siguiente ciclo si ya pasó. Para WEEKLY,
+// advanceDueDate no usa dueDay (solo suma 7 días desde el ancla), así que el primer
+// vencimiento es simplemente hoy (hora Bogotá).
+export function nextOccurrenceOnOrAfter(referenceDate, dueDay, frequency) {
+  const p = bogotaParts(referenceDate);
+  if (frequency === "WEEKLY") {
+    // advanceDueDate no usa dueDay para WEEKLY (simplemente suma 7 días desde el ancla),
+    // así que el primer vencimiento por defecto es hoy mismo (hora Bogotá), a las 00:00.
+    return makeBogotaDate(p.year, p.month, p.day, 0, 0, 0);
+  }
+  const monthsToAdd = MONTHS_TO_ADD[frequency];
+  if (!monthsToAdd) throw new Error(`Frecuencia desconocida: ${frequency}`);
+
+  // Candidato en el mes actual.
+  const thisMonthDay = Math.min(dueDay, daysInMonth(p.year, p.month));
+  let candidate = makeBogotaDate(p.year, p.month, thisMonthDay, 0, 0, 0);
+  const refMidnight = makeBogotaDate(p.year, p.month, p.day, 0, 0, 0);
+  if (candidate.getTime() < refMidnight.getTime()) {
+    const { year, month, day } = addMonthsClamped(p.year, p.month, dueDay, monthsToAdd);
+    candidate = makeBogotaDate(year, month, day, 0, 0, 0);
+  }
+  return candidate;
+}
+
+// Día de la semana (0=domingo..6=sábado) de un instante, en hora de Bogotá.
+export function bogotaWeekday(date) {
+  const localMs = date.getTime() + BOGOTA_OFFSET_MINUTES * 60000;
+  return new Date(localMs).getUTCDay();
+}
+
+// Dado un nextDueDate de servicio (posiblemente en el pasado, p.ej. tras una pausa larga, o un
+// anchorDate elegido por el usuario que ya pasó), lo hace avanzar según la frecuencia hasta que
+// el SIGUIENTE ciclo después de él todavía no haya llegado (referenceDate < siguiente ciclo).
+// Es decir, deja dueDate en el ciclo vigente más reciente: si el ciclo actual ya venció pero el
+// siguiente todavía no, no se avanza (para no saltarse el cobro normal del día); solo se avanza
+// cuando el servicio quedó varios ciclos completos atrás (p.ej. estuvo pausado meses), evitando
+// así generar/cobrar automáticamente pagos de periodos históricos.
+export function rollForward(dueDate, dueDay, frequency, referenceDate) {
+  let d = dueDate;
+  let iterations = 0;
+  while (advanceDueDate(d, dueDay, frequency).getTime() <= referenceDate.getTime() && iterations < 1000) {
+    d = advanceDueDate(d, dueDay, frequency);
+    iterations += 1;
+  }
+  return d;
+}

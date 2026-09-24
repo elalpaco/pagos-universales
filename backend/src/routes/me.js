@@ -27,7 +27,7 @@ const patchSchema = z.object({
   name: z.string().min(1).max(120).optional(),
   phone: z.string().max(30).nullable().optional(),
   notifyEmail: z.boolean().optional(),
-  monthlyLimitCop: z.number().int().positive().nullable().optional(),
+  monthlyLimitCop: z.number().int().positive().max(1_000_000_000).nullable().optional(),
 });
 
 router.patch("/", validateBody(patchSchema), async (req, res, next) => {

@@ -6,6 +6,8 @@ import {
   computeScheduledFor,
   periodKeyFor,
   daysInMonth,
+  nextOccurrenceOnOrAfter,
+  rollForward,
 } from "../src/lib/dates.js";
 
 describe("dates: daysInMonth", () => {
@@ -105,5 +107,73 @@ describe("dates: periodKeyFor", () => {
   it("genera YYYY-MM-DD para semanal", () => {
     const due = makeBogotaDate(2026, 10, 5);
     expect(periodKeyFor(due, "WEEKLY")).toBe("2026-10-05");
+  });
+});
+
+describe("dates: nextOccurrenceOnOrAfter", () => {
+  it("si el dueDay de este mes aún no pasó, lo devuelve", () => {
+    const ref = makeBogotaDate(2026, 10, 5, 9, 0, 0);
+    const next = nextOccurrenceOnOrAfter(ref, 22, "MONTHLY");
+    expect(bogotaParts(next)).toMatchObject({ year: 2026, month: 10, day: 22 });
+  });
+
+  it("si el dueDay de este mes ya pasó, avanza al mes siguiente", () => {
+    const ref = makeBogotaDate(2026, 10, 25, 9, 0, 0);
+    const next = nextOccurrenceOnOrAfter(ref, 22, "MONTHLY");
+    expect(bogotaParts(next)).toMatchObject({ year: 2026, month: 11, day: 22 });
+  });
+
+  it("si hoy es exactamente el dueDay, lo devuelve (no lo salta)", () => {
+    const ref = makeBogotaDate(2026, 10, 22, 9, 0, 0);
+    const next = nextOccurrenceOnOrAfter(ref, 22, "MONTHLY");
+    expect(bogotaParts(next)).toMatchObject({ year: 2026, month: 10, day: 22 });
+  });
+
+  it("respeta el fin de mes (clamping) igual que advanceDueDate", () => {
+    const ref = makeBogotaDate(2026, 2, 5, 0, 0, 0);
+    const next = nextOccurrenceOnOrAfter(ref, 31, "MONTHLY");
+    expect(bogotaParts(next)).toMatchObject({ year: 2026, month: 2, day: 28 });
+  });
+
+  it("WEEKLY: siempre devuelve hoy (advanceDueDate no usa dueDay para WEEKLY)", () => {
+    const ref = makeBogotaDate(2026, 10, 25, 15, 0, 0);
+    const next = nextOccurrenceOnOrAfter(ref, 3, "WEEKLY");
+    expect(bogotaParts(next)).toMatchObject({ year: 2026, month: 10, day: 25 });
+  });
+});
+
+describe("dates: rollForward", () => {
+  it("no toca una fecha que ya está en el futuro", () => {
+    const due = makeBogotaDate(2026, 12, 22, 0, 0, 0);
+    const ref = makeBogotaDate(2026, 10, 1, 0, 0, 0);
+    const rolled = rollForward(due, 22, "MONTHLY", ref);
+    expect(rolled.getTime()).toBe(due.getTime());
+  });
+
+  it("NO avanza el ciclo vigente aunque ya haya pasado, si el siguiente ciclo todavía no llega " +
+    "(evita el bug de saltarse el cobro normal del día por comparar contra scheduledFor)", () => {
+    // Vencimiento el 22 de octubre; "ahora" es el 20 de octubre (dentro de la ventana normal
+    // de cobro, scheduledFor ya pasó pero el ciclo en sí sigue vigente). No debe avanzar.
+    const due = makeBogotaDate(2026, 10, 22, 0, 0, 0);
+    const ref = makeBogotaDate(2026, 10, 20, 12, 0, 0);
+    const rolled = rollForward(due, 22, "MONTHLY", ref);
+    expect(rolled.getTime()).toBe(due.getTime());
+  });
+
+  it("avanza varios ciclos completos cuando el servicio quedó atrás (pausado meses), pero se " +
+    "detiene en el ciclo vigente más reciente sin saltarse al futuro", () => {
+    const due = makeBogotaDate(2026, 1, 15, 0, 0, 0);
+    const ref = makeBogotaDate(2026, 6, 1, 0, 0, 0);
+    const rolled = rollForward(due, 15, "MONTHLY", ref);
+    // Enero..mayo ya pasaron por completo (su siguiente ciclo también ya pasó); junio todavía
+    // no llega (su siguiente ciclo, julio, es posterior a la referencia) -> se detiene en mayo.
+    expect(bogotaParts(rolled)).toMatchObject({ year: 2026, month: 5, day: 15 });
+  });
+
+  it("una fecha muy vieja (años atrás) se replanifica al ciclo vigente más reciente, nunca queda en el pasado lejano", () => {
+    const due = makeBogotaDate(2020, 3, 5, 0, 0, 0);
+    const ref = makeBogotaDate(2026, 9, 24, 0, 0, 0);
+    const rolled = rollForward(due, 5, "MONTHLY", ref);
+    expect(bogotaParts(rolled).year).toBeGreaterThanOrEqual(2026);
   });
 });
