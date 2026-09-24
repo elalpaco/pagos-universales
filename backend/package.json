@@ -1,24 +1,41 @@
 {
   "name": "pagos-universales-backend",
   "version": "1.0.0",
-  "description": "Backend simple para PAGOS-UNIVERSALES",
-  "main": "src/index.js",
+  "description": "Backend de PAGOS-UNIVERSALES",
+  "main": "src/server.js",
   "type": "module",
   "scripts": {
-    "dev": "node src/index.js",
-    "start": "node src/index.js",
+    "dev": "node src/server.js",
+    "start": "node src/server.js",
+    "test": "vitest run",
+    "seed": "node prisma/seed.js",
+    "migrate": "prisma migrate deploy",
+    "migrate:dev": "prisma migrate dev",
     "db:push": "prisma db push",
     "prisma:generate": "prisma generate"
   },
   "dependencies": {
     "@prisma/client": "^5.22.0",
+    "bcryptjs": "^2.4.3",
+    "cookie-parser": "^1.4.6",
     "cors": "^2.8.5",
-    "express": "^4.19.2"
+    "express": "^4.19.2",
+    "express-rate-limit": "^7.4.1",
+    "helmet": "^7.1.0",
+    "jsonwebtoken": "^9.0.2",
+    "node-cron": "^3.0.3",
+    "nodemailer": "^6.9.15",
+    "zod": "^3.23.8"
   },
   "devDependencies": {
-    "prisma": "^5.22.0"
+    "prisma": "^5.22.0",
+    "supertest": "^7.0.0",
+    "vitest": "^2.1.4"
   },
   "engines": {
     "node": ">=18.0.0"
+  },
+  "prisma": {
+    "seed": "node prisma/seed.js"
   }
 }

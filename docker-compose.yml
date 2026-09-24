@@ -6,32 +6,63 @@ services:
     container_name: pagos_universales_db
     restart: unless-stopped
     environment:
-      POSTGRES_USER: postgres
-      POSTGRES_PASSWORD: postgres
-      POSTGRES_DB: pagos_universales
+      POSTGRES_USER: ${POSTGRES_USER:-postgres}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
+      POSTGRES_DB: ${POSTGRES_DB:-pagos_universales}
     ports:
       - "5432:5432"
     volumes:
       - db_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-postgres} -d ${POSTGRES_DB:-pagos_universales}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
 
   backend:
     build: ./backend
     container_name: pagos_universales_backend
     restart: unless-stopped
     environment:
-      DATABASE_URL: "postgresql://postgres:postgres@db:5432/pagos_universales"
+      NODE_ENV: ${NODE_ENV:-production}
+      DATABASE_URL: "postgresql://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-postgres}@db:5432/${POSTGRES_DB:-pagos_universales}"
       PORT: "4000"
+      TZ: "America/Bogota"
+      JWT_SECRET: ${JWT_SECRET:-dev-jwt-secret-change-me-0000000000}
+      ENCRYPTION_KEY: ${ENCRYPTION_KEY:-dev-encryption-key-change-me-0000}
+      ALLOW_SIGNUP: ${ALLOW_SIGNUP:-true}
+      PAYMENT_GATEWAY: ${PAYMENT_GATEWAY:-simulated}
+      WOMPI_ENV: ${WOMPI_ENV:-sandbox}
+      WOMPI_PUBLIC_KEY: ${WOMPI_PUBLIC_KEY:-}
+      WOMPI_PRIVATE_KEY: ${WOMPI_PRIVATE_KEY:-}
+      WOMPI_INTEGRITY_SECRET: ${WOMPI_INTEGRITY_SECRET:-}
+      FEE_PERCENT: ${FEE_PERCENT:-0}
+      FEE_FIXED_COP: ${FEE_FIXED_COP:-0}
+      SCHEDULER_ENABLED: ${SCHEDULER_ENABLED:-true}
+      SCHEDULER_CRON: ${SCHEDULER_CRON:-*/5 * * * *}
+      SMTP_HOST: ${SMTP_HOST:-}
+      SMTP_PORT: ${SMTP_PORT:-587}
+      SMTP_USER: ${SMTP_USER:-}
+      SMTP_PASS: ${SMTP_PASS:-}
+      SMTP_FROM: ${SMTP_FROM:-}
+      ADMIN_EMAIL: ${ADMIN_EMAIL:-diego@pelletier.com.co}
+      ADMIN_NAME: ${ADMIN_NAME:-Diego}
+      ADMIN_PASSWORD: ${ADMIN_PASSWORD:-CambiaEsta123!}
     depends_on:
-      - db
+      db:
+        condition: service_healthy
     ports:
       - "4000:4000"
 
   frontend:
-    build: ./frontend
+    build:
+      context: ./frontend
+      args:
+        BACKEND_URL: http://backend:4000
     container_name: pagos_universales_frontend
     restart: unless-stopped
     environment:
-      NEXT_PUBLIC_API_URL: "http://localhost:4000"
+      BACKEND_URL: "http://backend:4000"
     depends_on:
       - backend
     ports:

@@ -7,9 +7,179 @@ datasource db {
   url      = env("DATABASE_URL")
 }
 
+enum Role {
+  USER
+  ADMIN
+}
+
+enum PaymentMethodStatus {
+  ACTIVE
+  EXPIRED
+  REMOVED
+}
+
+enum AmountType {
+  FIXED
+  VARIABLE
+}
+
+enum Frequency {
+  WEEKLY
+  MONTHLY
+  BIMONTHLY
+  QUARTERLY
+  YEARLY
+}
+
+enum ServiceStatus {
+  ACTIVE
+  PAUSED
+  DELETED
+}
+
+enum PaymentStatus {
+  SCHEDULED
+  PENDING_APPROVAL
+  CHARGING
+  CHARGED
+  DISBURSING
+  PAID
+  SKIPPED
+  FAILED
+  REFUND_PENDING
+  REFUNDED
+}
+
 model User {
-  id        Int      @id @default(autoincrement())
-  email     String   @unique
-  name      String?
+  id              Int              @id @default(autoincrement())
+  email           String           @unique
+  name            String?
+  passwordHash    String
+  role            Role             @default(USER)
+  phone           String?
+  notifyEmail     Boolean          @default(true)
+  monthlyLimitCop Int?
+  createdAt       DateTime         @default(now())
+  updatedAt       DateTime         @updatedAt
+
+  paymentMethods  PaymentMethod[]
+  services        Service[]
+  payments        Payment[]
+  notifications   Notification[]
+  auditLogs       AuditLog[]       @relation("AuditUser")
+}
+
+model PaymentMethod {
+  id               Int                 @id @default(autoincrement())
+  userId           Int
+  user             User                @relation(fields: [userId], references: [id])
+  provider         String
+  providerTokenEnc String
+  brand            String
+  last4            String
+  expMonth         Int
+  expYear          Int
+  holderName       String
+  isDefault        Boolean             @default(false)
+  status           PaymentMethodStatus @default(ACTIVE)
+  createdAt        DateTime            @default(now())
+
+  services         Service[]
+  payments         Payment[]
+}
+
+model Biller {
+  id             Int         @id @default(autoincrement())
+  name           String      @unique
+  category       String
+  logoEmoji      String?
+  amountType     AmountType
+  referenceLabel String
+  referenceRegex String?
+  payoutProvider String      @default("manual")
+  isActive       Boolean     @default(true)
+
+  services       Service[]
+}
+
+model Service {
+  id             Int           @id @default(autoincrement())
+  userId         Int
+  user           User          @relation(fields: [userId], references: [id])
+  billerId       Int?
+  biller         Biller?       @relation(fields: [billerId], references: [id])
+  customName     String?
+  category       String
+  reference      String
+  amountType     AmountType
+  fixedAmountCop Int?
+  maxAmountCop   Int?
+  frequency      Frequency
+  dueDay         Int
+  anchorDate     DateTime
+  payDaysBefore  Int           @default(2)
+  paymentMethodId Int?
+  paymentMethod  PaymentMethod? @relation(fields: [paymentMethodId], references: [id])
+  status         ServiceStatus @default(ACTIVE)
+  nextDueDate    DateTime
+  createdAt      DateTime      @default(now())
+  updatedAt      DateTime      @updatedAt
+
+  payments       Payment[]
+}
+
+model Payment {
+  id                Int           @id @default(autoincrement())
+  userId            Int
+  user              User          @relation(fields: [userId], references: [id])
+  serviceId         Int
+  service           Service       @relation(fields: [serviceId], references: [id])
+  paymentMethodId   Int?
+  paymentMethod     PaymentMethod? @relation(fields: [paymentMethodId], references: [id])
+  periodKey         String
+  dueDate           DateTime
+  scheduledFor      DateTime
+  amountCop         Int?
+  feeCop            Int           @default(0)
+  totalCop          Int?
+  status            PaymentStatus @default(SCHEDULED)
+  attempts          Int           @default(0)
+  nextAttemptAt     DateTime?
+  lastError         String?
+  gatewayRef        String?
+  payoutRef         String?
+  payoutReceiptUrl  String?
+  idempotencyKey    String        @unique
+  reminderSentAt    DateTime?
+  approvedAt        DateTime?
+  chargedAt         DateTime?
+  paidAt            DateTime?
+  createdAt         DateTime      @default(now())
+  updatedAt         DateTime      @updatedAt
+  version           Int           @default(0)
+
+  @@unique([serviceId, periodKey])
+}
+
+model Notification {
+  id        Int       @id @default(autoincrement())
+  userId    Int
+  user      User      @relation(fields: [userId], references: [id])
+  type      String
+  title     String
+  body      String
+  readAt    DateTime?
+  createdAt DateTime  @default(now())
+}
+
+model AuditLog {
+  id       Int      @id @default(autoincrement())
+  userId   Int?
+  user     User?    @relation("AuditUser", fields: [userId], references: [id])
+  actorId  Int?
+  action   String
+  entity   String
+  entityId Int
+  data     Json?
   createdAt DateTime @default(now())
 }
